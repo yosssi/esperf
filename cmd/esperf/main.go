@@ -1,10 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"flag"
-	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -32,22 +33,40 @@ type result struct {
 	end        time.Time
 	err        error
 	statusCode int
+	hits       int
 }
 
 func (r *result) strings() []string {
 	var s []string
 
-	s = append(s, strconv.Itoa(int(r.end.Sub(r.start)/1000000)))
+	if r.start.IsZero() {
+		s = append(s, "")
+	} else {
+		s = append(s, r.start.Format(timeFormat))
+	}
+
+	if r.end.IsZero() {
+		s = append(s, "")
+	} else {
+		s = append(s, r.end.Format(timeFormat))
+	}
+
+	if r.start.IsZero() || r.end.IsZero() {
+		s = append(s, "")
+	} else {
+		s = append(s, strconv.Itoa(int(r.end.Sub(r.start)/1000000)))
+	}
 
 	if r.err == nil {
 		s = append(s, "0")
 		s = append(s, "")
-		s = append(s, strconv.Itoa(r.statusCode))
 	} else {
 		s = append(s, "1")
 		s = append(s, r.err.Error())
-		s = append(s, "")
 	}
+
+	s = append(s, strconv.Itoa(r.statusCode))
+	s = append(s, strconv.Itoa(r.hits))
 
 	return s
 }
@@ -64,6 +83,33 @@ func (r *result) writeCSVTo(w *csv.Writer) error {
 
 	return nil
 }
+
+func (r *result) setResponse(resp *http.Response) {
+	defer resp.Body.Close()
+
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		r.err = err
+		return
+	}
+
+	var rb respBody
+	if err := json.Unmarshal(b, &rb); err != nil {
+		r.err = err
+		return
+	}
+
+	r.hits = rb.Hits.Total
+}
+
+type respBody struct {
+	Hits struct {
+		Total int
+	}
+}
+
+// Time format
+const timeFormat = "2006-01-02 15:04:05.999"
 
 // Flags
 var (
@@ -126,15 +172,11 @@ func main() {
 		go load()
 	}
 
-	fmt.Printf("%+v\n%+v\n", conf, conds)
-
 	time.Sleep(time.Duration(conf.Mins) * time.Minute)
 
 	close(closec)
 
 	wg.Wait()
-
-	fmt.Printf("%+v\n%+v\n", conf, conds)
 }
 
 func load() {
@@ -145,22 +187,46 @@ func load() {
 		case <-closec:
 			return
 		default:
-			rslt := &result{
-				start: time.Now(),
-			}
-
-			resp, err := http.Post(conf.url(), "application/json", nil)
-			rslt.end = time.Now()
-			if err == nil {
-				rslt.statusCode = resp.StatusCode
-			} else {
-				rslt.err = err
-			}
-
-			rslt.writeCSVTo(w)
-
-			time.Sleep(1 * time.Second)
+			post()
 		}
 
+		time.Sleep(1 * time.Second)
 	}
+}
+
+func post() {
+	rslt := new(result)
+
+	defer rslt.writeCSVTo(w)
+
+	r, err := reqBody()
+	if err != nil {
+		rslt.err = err
+		return
+	}
+
+	rslt.start = time.Now()
+	resp, err := http.Post(conf.url(), "application/json", r)
+	rslt.end = time.Now()
+	if err != nil {
+		rslt.err = err
+		return
+	}
+
+	rslt.statusCode = resp.StatusCode
+
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	rslt.setResponse(resp)
+}
+
+func reqBody() (io.Reader, error) {
+	b, err := json.Marshal(conds[rand.Intn(len(conds))])
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes.NewReader(b), nil
 }
