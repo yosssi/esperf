@@ -1,2 +1,1 @@
-# esperf
-Elasticsearch Performance Test Application
+# Elasticsearch Performance Test Tool
