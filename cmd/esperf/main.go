@@ -12,6 +12,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -115,6 +116,7 @@ const timeFormat = "2006-01-02 15:04:05.999"
 var (
 	confPath  = flag.String("conf", "", "configuration file path")
 	condsPath = flag.String("conds", "", "conditions file paths")
+	dataPath  = flag.String("data", "", "data file paths")
 )
 
 // Config
@@ -122,6 +124,9 @@ var conf config
 
 // Conditions
 var conds []interface{}
+
+// Data
+var data map[string][]string
 
 // Wait group
 var wg sync.WaitGroup
@@ -155,6 +160,15 @@ func main() {
 	}
 
 	if err := json.Unmarshal(condsd, &conds); err != nil {
+		panic(err)
+	}
+
+	datad, err := ioutil.ReadFile(*dataPath)
+	if err != nil {
+		panic(err)
+	}
+
+	if err := json.Unmarshal(datad, &data); err != nil {
 		panic(err)
 	}
 
@@ -228,5 +242,19 @@ func reqBody() (io.Reader, error) {
 		return nil, err
 	}
 
-	return bytes.NewReader(b), nil
+	s := string(b)
+
+	for k, values := range data {
+		key := "$" + k
+
+		for {
+			if strings.Index(s, key) == -1 {
+				break
+			}
+
+			s = strings.Replace(s, key, values[rand.Intn(len(values))], 1)
+		}
+	}
+
+	return bytes.NewReader([]byte(s)), nil
 }
