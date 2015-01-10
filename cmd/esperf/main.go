@@ -32,6 +32,7 @@ func (c *config) url() string {
 type result struct {
 	start      time.Time
 	end        time.Time
+	cond       *cond
 	err        error
 	statusCode int
 	hits       int
@@ -57,6 +58,8 @@ func (r *result) strings() []string {
 	} else {
 		s = append(s, strconv.Itoa(int(r.end.Sub(r.start)/1000000)))
 	}
+
+	s = append(s, strconv.Itoa(r.cond.ID))
 
 	if r.err == nil {
 		s = append(s, "0")
@@ -109,6 +112,11 @@ type respBody struct {
 	}
 }
 
+type cond struct {
+	ID   int
+	Cond interface{}
+}
+
 // Time format
 const timeFormat = "2006-01-02 15:04:05.999"
 
@@ -123,7 +131,7 @@ var (
 var conf config
 
 // Conditions
-var conds []interface{}
+var conds []cond
 
 // Data
 var data map[string][]string
@@ -213,7 +221,8 @@ func post() {
 
 	defer rslt.writeCSVTo(w)
 
-	r, err := reqBody()
+	r, cnd, err := reqBody()
+	rslt.cond = cnd
 	if err != nil {
 		rslt.err = err
 		return
@@ -236,10 +245,13 @@ func post() {
 	rslt.setResponse(resp)
 }
 
-func reqBody() (io.Reader, error) {
-	b, err := json.Marshal(conds[rand.Intn(len(conds))])
+func reqBody() (io.Reader, *cond, error) {
+	cnd := conds[rand.Intn(len(conds))]
+
+	b, err := json.Marshal(cnd.Cond)
+
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	s := string(b)
@@ -247,14 +259,12 @@ func reqBody() (io.Reader, error) {
 	for k, values := range data {
 		key := "$" + k
 
-		for {
-			if strings.Index(s, key) == -1 {
-				break
-			}
-
-			s = strings.Replace(s, key, values[rand.Intn(len(values))], 1)
+		if strings.Index(s, key) == -1 {
+			continue
 		}
+
+		s = strings.Replace(s, key, values[rand.Intn(len(values))], -1)
 	}
 
-	return bytes.NewReader([]byte(s)), nil
+	return bytes.NewReader([]byte(s)), &cnd, nil
 }
