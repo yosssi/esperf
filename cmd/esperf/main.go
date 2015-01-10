@@ -209,7 +209,8 @@ func load() {
 		case <-closec:
 			return
 		default:
-			post()
+			wg.Add(1)
+			go post()
 		}
 
 		time.Sleep(1 * time.Second)
@@ -217,6 +218,8 @@ func load() {
 }
 
 func post() {
+	defer wg.Done()
+
 	rslt := new(result)
 
 	defer rslt.writeCSVTo(w)
